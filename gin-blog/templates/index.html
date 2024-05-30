@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blog App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+
+        #app {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        h1, h2 {
+            color: #333;
+        }
+
+        #posts div {
+            background: #fff;
+            margin-bottom: 10px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        form {
+            background: #fff;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+
+        form label {
+            display: block;
+            margin-top: 10px;
+        }
+
+        form input, form textarea {
+            width: 100%;
+            padding: 10px;
+            margin-top: 5px;
+        }
+
+        form button {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 10px 15px;
+            background: #333;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <h1>Blog Posts</h1>
+        <div id="posts">
+            <script>
+                // Function to fetch posts from the server
+                function fetchPosts() {
+                    fetch("/posts", {
+                        method: "GET",
+                        headers: {
+                            "Content-Type": "application/json"
+                        }
+                    })
+                    .then(response => response.json())
+                    .then(posts => {
+                        // Clear existing posts
+                        const postsContainer = document.getElementById("posts");
+                        postsContainer.innerHTML = "";
+            
+                        // Append new posts to the container
+                        posts.forEach(post => {
+                            const postElement = document.createElement("div");
+                            postElement.innerHTML = `
+                                <h3>${post.title}</h3>
+                                <p>${post.content}</p>
+                                <form action="/delete/${post.id}" method="POST" style="display: inline;">
+                                    <button type="submit">Delete</button>
+                                </form>
+                                <button onclick="showEditForm('${post.id}', '${post.title}', '${post.content}')">Edit</button>
+                            `;
+                            postsContainer.appendChild(postElement);
+                        });
+                    })
+                    .catch(error => console.error("Error:", error));
+                }
+            
+                // Function to be called when the page loads
+                window.onload = function() {
+                    // Fetch posts from the server and update the HTML
+                    fetchPosts();
+                };
+            </script>
+        </div>
+
+        <h2>Create a New Post</h2>
+        <form id="postForm" action="/create" method="POST">
+            <label for="title">Title:</label>
+            <input type="text" id="title" name="title" required><br>
+            <label for="content">Content:</label>
+            <textarea id="content" name="content" required></textarea><br>
+            <button type="submit">Create Post</button>
+        </form>
+
+        <div id="editFormContainer" style="display:none;">
+            <h2>Edit Post</h2>
+            <form id="editForm" method="POST">
+                <label for="editTitle">Title:</label>
+                <input type="text" id="editTitle" name="title" required><br>
+                <label for="editContent">Content:</label>
+                <textarea id="editContent" name="content" required></textarea><br>
+                <button type="submit">Update Post</button>
+            </form>
+        </div>
+
+        <h2>Login</h2>
+        <form id="loginForm" onsubmit="login(event)">
+            <label for="username">Username:</label>
+            <input type="text" id="username" name="username" required><br>
+            <label for="password">Password:</label>
+            <input type="password" id="password" name="password" required><br>
+            <button type="submit">Login</button>
+        </form>
+    </div>
+
+    <script>
+        function getJwtToken() {
+            const name = 'token=';
+            const decodedCookie = decodeURIComponent(document.cookie);
+            const cookieArray = decodedCookie.split(';');
+            for (let i = 0; i < cookieArray.length; i++) {
+                let cookie = cookieArray[i];
+                while (cookie.charAt(0) === ' ') {
+                    cookie = cookie.substring(1);
+                }
+                if (cookie.indexOf(name) === 0) {
+                    return cookie.substring(name.length, cookie.length);
+                }
+            }
+            return '';
+        }
+
+        function fetchData() {
+            const token = getJwtToken();
+
+            fetch("/protected-endpoint", {
+                method: "GET",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "Content-Type": "application/json"
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Handle the data returned from the server
+                console.log(data);
+            })
+            .catch(error => console.error("Error:", error));
+        }
+
+        function login(event) {
+            event.preventDefault();
+            const username = document.getElementById("username").value;
+            const password = document.getElementById("password").value;
+
+            fetch("/login", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ username: username, password: password })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Handle response from the server (e.g., save token in cookie)
+                document.cookie = `token=${data.token}`;
+                // Optionally, redirect the user or perform other actions
+                console.log("Login successful");
+            })
+            .catch(error => console.error("Error:", error));
+        }
+
+        // Call the fetchData function when the page loads
+        window.onload = fetchData;
+    </script>
+</body>
+</html>
