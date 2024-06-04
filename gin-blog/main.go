@@ -6,9 +6,14 @@ import (
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
-var jwtKey = []byte("my_secret_key")
+var (
+	db     *gorm.DB
+	jwtKey = []byte("my_secret_key")
+)
 
 type Credentials struct {
 	Username string `json:"username"`
@@ -20,30 +25,42 @@ type Claims struct {
 	jwt.StandardClaims
 }
 
+type User struct {
+	ID       uint   `gorm:"primaryKey"`
+	Username string `gorm:"unique;not null"`
+	Password string `gorm:"not null"`
+}
+
 type Post struct {
-	ID      string `json:"id"`
+	ID      uint   `gorm:"primaryKey"`
 	Title   string `json:"title"`
 	Content string `json:"content"`
+	UserID  uint   `json:"user_id"`
 }
-
-var posts = []Post{
-	{ID: "1", Title: "First Post", Content: "This is my first post"},
-	{ID: "2", Title: "Second Post", Content: "This is my second post"},
-}
-
-var users = make(map[string]string)
 
 func main() {
+	var err error
+	db, err = gorm.Open(sqlite.Open("test.db"), &gorm.Config{})
+	if err != nil {
+		panic("failed to connect database")
+	}
+
+	// Auto migrate the database
+	db.AutoMigrate(&User{}, &Post{})
+
 	router := gin.Default()
 
 	router.POST("/register", register)
 	router.POST("/login", login)
 	router.POST("/create", authenticate, createPost)
-	router.PUT("/update/:id", authenticate, updatePost)    // Change to PUT
-	router.DELETE("/delete/:id", authenticate, deletePost) // Change to DELETE
-
-	router.Run("localhost:8081")
+	router.PUT("/update/:id", authenticate, updatePost)
+	router.DELETE("/delete/:id", authenticate, deletePost)
+	router.GET("/", func(c *gin.Context) {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "hello"})
+	})
+	router.Run(":8081")
 }
+
 func register(c *gin.Context) {
 	var creds Credentials
 	if err := c.BindJSON(&creds); err != nil {
@@ -51,14 +68,13 @@ func register(c *gin.Context) {
 		return
 	}
 
-	// Check if username already exists
-	if _, exists := users[creds.Username]; exists {
+	user := User{Username: creds.Username, Password: creds.Password}
+	result := db.Create(&user)
+
+	if result.Error != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Username already exists"})
 		return
 	}
-
-	// Store username and password in memory
-	users[creds.Username] = creds.Password
 
 	c.JSON(http.StatusOK, gin.H{"message": "User registered successfully"})
 }
@@ -70,8 +86,8 @@ func login(c *gin.Context) {
 		return
 	}
 
-	// Check if user exists and password matches
-	if storedPassword, exists := users[creds.Username]; !exists || storedPassword != creds.Password {
+	var user User
+	if err := db.Where("username = ? AND password = ?", creds.Username, creds.Password).First(&user).Error; err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
@@ -122,51 +138,57 @@ func authenticate(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
 		return
 	}
+	c.Set("username", claims.Username)
 	c.Next()
 }
 
 func createPost(c *gin.Context) {
-	id := c.PostForm("id")
-	title := c.PostForm("title")
-	content := c.PostForm("content")
+	username, _ := c.Get("username")
+	var user User
+	db.Where("username = ?", username).First(&user)
 
-	newPost := Post{
-		ID:      id,
-		Title:   title,
-		Content: content,
+	var post Post
+	if err := c.ShouldBindJSON(&post); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
 	}
-	posts = append(posts, newPost)
+	post.UserID = user.ID
+
+	if err := db.Create(&post).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create post"})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Post created successfully"})
 }
 
 func updatePost(c *gin.Context) {
 	id := c.Param("id")
-	title := c.PostForm("title")
-	content := c.PostForm("content")
-
-	for i, p := range posts {
-		if p.ID == id {
-			posts[i].Title = title
-			posts[i].Content = content
-			c.JSON(http.StatusOK, gin.H{"message": "Post updated successfully"})
-			return
-		}
+	var post Post
+	if err := db.Where("id = ?", id).First(&post).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Post not found"})
+		return
 	}
 
-	c.JSON(http.StatusNotFound, gin.H{"error": "Post not found"})
+	if err := c.ShouldBindJSON(&post); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	if err := db.Save(&post).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not update post"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Post updated successfully"})
 }
 
 func deletePost(c *gin.Context) {
 	id := c.Param("id")
-
-	for i, p := range posts {
-		if p.ID == id {
-			posts = append(posts[:i], posts[i+1:]...)
-			c.JSON(http.StatusOK, gin.H{"message": "Post deleted successfully"})
-			return
-		}
+	if err := db.Delete(&Post{}, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Post not found"})
+		return
 	}
 
-	c.JSON(http.StatusNotFound, gin.H{"error": "Post not found"})
+	c.JSON(http.StatusOK, gin.H{"message": "Post deleted successfully"})
 }
